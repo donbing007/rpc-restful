@@ -1,0 +1,63 @@
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+    <!-- 配置镜像以便所有的请求都通过Nexus -->
+    <mirrors>
+        <mirror>
+            <id>central</id>
+            <mirrorOf>central</mirrorOf>
+            <url>http://192.168.0.234:8888/repository/maven-central/</url>
+        </mirror>
+        <mirror>
+            <id>nexus</id>
+            <mirrorOf>*</mirrorOf>
+            <url>http://192.168.0.234:8888/repository/maven-public/</url>
+        </mirror>
+    </mirrors>
+
+    <!-- 配置认证信息 -->
+    <servers>
+        <server>
+            <id>nexus</id> <!-- 确保这个ID与distributionManagement中的仓库ID相匹配 -->
+            <username>{your username}</username>
+            <password>{your password}</password>
+        </server>
+    </servers>
+
+    <!-- 配置profiles以便可以动态激活或关闭一些配置 -->
+    <profiles>
+        <profile>
+            <id>nexus</id>
+            <!-- 确保部署构件时的url与Nexus上的发布仓库和快照仓库相对应 -->
+            <repositories>
+                <repository>
+                    <id>nexus-releases</id>
+                    <url>http://192.168.0.234:8888/repository/maven-releases/</url>
+                    <releases>
+                        <enabled>true</enabled> <!-- 允许从此处下载Releases -->
+                    </releases>
+                    <snapshots>
+                        <enabled>false</enabled> <!-- 禁止从此处下载Snapshots -->
+                    </snapshots>
+                </repository>
+                <repository>
+                    <id>nexus-snapshots</id>
+                    <url>http://192.168.0.234:8888/repository/maven-snapshots/</url>
+                    <releases>
+                        <enabled>false</enabled> <!-- 禁止从此处下载Releases -->
+                    </releases>
+                    <snapshots>
+                        <enabled>true</enabled> <!-- 允许从此处下载Snapshots -->
+                    </snapshots>
+                </repository>
+            </repositories>
+        </profile>
+    </profiles>
+
+    <!-- 默认激活的profile -->
+    <activeProfiles>
+        <activeProfile>nexus</activeProfile>
+    </activeProfiles>
+
+</settings>
