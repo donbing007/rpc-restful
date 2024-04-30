@@ -6,6 +6,7 @@ import com.vmsmia.framework.component.rpc.restful.serializer.bytes.PlainBytesDes
 import com.vmsmia.framework.component.rpc.restful.serializer.string.PlainStringDeserializer;
 import com.vmsmia.framework.component.rpc.restful.serializer.string.json.JsonDeserializer;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * 媒体类型的工具.
@@ -19,7 +20,7 @@ public final class MediaTypes {
     /**
      * 默认的媒体类型.
      */
-    public static final MediaType DEFAULT_MEDIA_TYPE = MediaType.create("text/plain; charset=utf8");
+    public static final MediaType DEFAULT_MEDIA_TYPE = MediaType.create("text/plain; charset=UTF-8");
 
     private MediaTypes() {
     }
@@ -48,7 +49,7 @@ public final class MediaTypes {
                 return Optional.ofNullable(PlainStringDeserializer.getInstance());
             } else if (returnType == byte[].class) {
                 return Optional.ofNullable(PlainBytesDeserializer.getInstance());
-            } else if (ClassHelper.isPrimitiveOrWrapper(returnType)) {
+            } else if (Primitives.isPrimitiveOrWrapper(returnType)) {
                 return Optional.ofNullable(PrimitiveDeserializer.getInstance());
             } else {
                 return Optional.empty();

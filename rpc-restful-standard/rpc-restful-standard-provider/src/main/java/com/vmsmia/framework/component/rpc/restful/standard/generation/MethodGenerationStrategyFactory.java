@@ -6,6 +6,7 @@ import com.vmsmia.framework.component.rpc.restful.annotation.method.Head;
 import com.vmsmia.framework.component.rpc.restful.annotation.method.Patch;
 import com.vmsmia.framework.component.rpc.restful.annotation.method.Post;
 import com.vmsmia.framework.component.rpc.restful.annotation.method.Put;
+import com.vmsmia.framework.component.rpc.restful.annotation.method.Stream;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -30,6 +31,7 @@ public class MethodGenerationStrategyFactory {
         STRATEGY_MAP.put(Head.class.getName(), new HeadMethodGenerationStrategy());
         STRATEGY_MAP.put(Patch.class.getName(), new PatchMehtodGenerationStrategy());
         STRATEGY_MAP.put(Put.class.getName(), new PutMethodGenerationStrategy());
+        STRATEGY_MAP.put(Stream.class.getName(), new StreamMethodGenerationStrategy());
     }
 
     public static MethodGenerationStrategy getStrategy(ExecutableElement el) {

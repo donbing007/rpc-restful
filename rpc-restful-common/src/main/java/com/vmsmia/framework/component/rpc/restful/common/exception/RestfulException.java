@@ -1,4 +1,4 @@
-package com.vmsmia.framework.component.rpc.restful;
+package com.vmsmia.framework.component.rpc.restful.common.exception;
 
 /**
  * @author bin.dong

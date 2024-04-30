@@ -13,6 +13,7 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>rpc-restful-standard-conductor</module>
         <module>rpc-restful-standard-provider</module>
     </modules>
 

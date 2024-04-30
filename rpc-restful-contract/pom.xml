@@ -13,6 +13,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.vmsmia.framework.component.rpc.restful</groupId>
+            <artifactId>rpc-restful-loadbalancer</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
         </dependency>

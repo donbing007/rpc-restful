@@ -16,11 +16,15 @@ import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.stmt.ThrowStmt;
 import com.google.testing.compile.Compilation;
+import com.google.testing.compile.Compiler;
 import com.google.testing.compile.JavaFileObjects;
+import com.vmsmia.framework.component.rpc.restful.discovery.Endpoint;
+import com.vmsmia.framework.component.rpc.restful.discovery.InMemoryDiscover;
 import com.vmsmia.framework.component.rpc.restful.serializer.string.json.Json;
-import com.vmsmia.framework.component.rpc.restful.standard.client.discovery.Endpoint;
-import com.vmsmia.framework.component.rpc.restful.standard.client.discovery.InMemoryDiscover;
 import com.vmsmia.framework.component.rpc.restful.standard.utils.InMemoryClassLoader;
+import com.vmsmia.framework.component.rpc.restful.standard.utils.MockStreamSubscriber;
+import com.vmsmia.framework.component.rpc.restful.standard.utils.RandomUtils;
+import com.vmsmia.framework.component.rpc.restful.stream.StreamSubscriber;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -28,8 +32,12 @@ import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
+import okhttp3.Dispatcher;
+import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -46,8 +54,11 @@ public class RpcClientProcessorTest {
 
     private MockWebServer mockWebServer;
     private InMemoryDiscover discovery;
+    private OkHttpClient okHttpClient;
+    private ExecutorService executor;
 
     private InMemoryClassLoader classLoader;
+    private Compiler compiler;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -58,15 +69,30 @@ public class RpcClientProcessorTest {
         discovery.register("test", new Endpoint(mockWebServer.getHostName(), mockWebServer.getPort()));
 
         classLoader = new InMemoryClassLoader();
+
+        executor = Executors.newFixedThreadPool(10);
+        Dispatcher dispatcher = new Dispatcher(executor);
+        dispatcher.setMaxRequests(100);
+        dispatcher.setMaxRequestsPerHost(30);
+        okHttpClient = new OkHttpClient.Builder()
+            .dispatcher(dispatcher)
+            .retryOnConnectionFailure(true)
+            .build();
+
+        this.compiler = javac()
+            .withProcessors(new RpcClientProcessor())
+            .withOptions("-A" + RpcClientProcessor.Configuration.OPTIONS_USE_FIXED_CLASS_NAME + "=true");
     }
 
     @AfterEach
     void tearDown() throws IOException {
         mockWebServer.close();
         discovery.reset();
+        executor.shutdown();
         mockWebServer = null;
         discovery = null;
         classLoader = null;
+        compiler = null;
     }
 
     @Test
@@ -75,11 +101,7 @@ public class RpcClientProcessorTest {
         assertNotNull(url);
         JavaFileObject mockInterface = JavaFileObjects.forResource(url);
 
-        Compilation compilation = javac()
-            .withProcessors(new RpcClientProcessor())
-            .withOptions("-A" + RpcClientProcessor.Configuration.OPTIONS_USE_FIXED_CLASS_NAME + "=true")
-            .compile(mockInterface);
-
+        Compilation compilation = compiler.compile(mockInterface);
         assertEquals(Compilation.Status.SUCCESS, compilation.status(), () -> buildError(compilation.errors()));
 
         List<JavaFileObject> files = compilation.generatedSourceFiles();
@@ -125,7 +147,6 @@ public class RpcClientProcessorTest {
 
             assertTrue(() -> {
                 ThrowStmt throwStmt = (ThrowStmt) statement;
-                System.out.println(throwStmt.getExpression().toString());
                 return throwStmt.getExpression().toString().startsWith("new UnsupportedOperationException");
             });
         }
@@ -151,11 +172,7 @@ public class RpcClientProcessorTest {
         assertNotNull(url);
         JavaFileObject mockInterface = JavaFileObjects.forResource(url);
 
-        Compilation compilation = javac()
-            .withProcessors(new RpcClientProcessor())
-            .withOptions("-A" + RpcClientProcessor.Configuration.OPTIONS_USE_FIXED_CLASS_NAME + "=true")
-            .compile(mockInterface);
-
+        Compilation compilation = compiler.compile(mockInterface);
         assertEquals(Compilation.Status.SUCCESS, compilation.status(), () -> buildError(compilation.errors()));
 
         initMemoryClassLoader(compilation);
@@ -177,11 +194,52 @@ public class RpcClientProcessorTest {
         assertEquals("/test/get/100?type=read", recordedRequest.getPath());
     }
 
+    @Test
+    public void testStreamAnnotationInterface() throws Exception {
+        URL url = RpcClientProcessorTest.class.getResource("/mock/StreamAnnotationInterface.java");
+        assertNotNull(url);
+        JavaFileObject mockInterface = JavaFileObjects.forResource(url);
+
+        Compilation compilation = compiler.compile(mockInterface);
+        assertEquals(Compilation.Status.SUCCESS, compilation.status(), () -> buildError(compilation.errors()));
+        initMemoryClassLoader(compilation);
+
+        String data = RandomUtils.generateRandomString(512, 1024);
+        mockWebServer.enqueue(new MockResponse()
+            .setResponseCode(200)
+            .setHeader("Content-Type", "text/plain; charset=utf8")
+            .setChunkedBody(data, 256)
+        );
+
+        Class<?> implClass =
+            classLoader.loadClass(RpcClientProcessor.GENERATION_PACKAGE + ".StreamAnnotationInterfaceImpl");
+        Object instance = getInstance(implClass);
+        Method callMethod = implClass.getMethod("call", String.class, Long.TYPE, StreamSubscriber.class);
+        MockStreamSubscriber subscriber = new MockStreamSubscriber(128);
+        callMethod.invoke(instance, "test", 100, subscriber);
+
+        while (!subscriber.isFinished()) {
+            Thread.sleep(100);
+        }
+
+        assertTrue(subscriber.isCompleted());
+        String readValue = subscriber.getStringValue();
+        assertEquals(data.length(), readValue.length());
+        assertEquals(data, subscriber.getStringValue());
+    }
+
     private void injectDiscover(Object instance) throws Exception {
         Class<?> clazz = instance.getClass();
         Field discoverField = clazz.getDeclaredField(RpcClientProcessor.DISCOVER_MEMBER_VARIABLE_NAME);
         discoverField.setAccessible(true);
         discoverField.set(instance, this.discovery);
+    }
+
+    private void injectOkHttpClient(Object instance) throws Exception {
+        Class<?> clazz = instance.getClass();
+        Field okHttpClientField = clazz.getDeclaredField(RpcClientProcessor.OKHTTPCLIENT_MEMBER_VARIABLE_NAME);
+        okHttpClientField.setAccessible(true);
+        okHttpClientField.set(instance, this.okHttpClient);
     }
 
     private String buildError(List<Diagnostic<? extends JavaFileObject>> errors) {
@@ -204,11 +262,8 @@ public class RpcClientProcessorTest {
     private Object getInstance(Class<?> implClass) throws Exception {
         Object instance = implClass.newInstance();
         injectDiscover(instance);
+        injectOkHttpClient(instance);
         return instance;
-    }
-
-    private Class<?> getClasses(String fqn) throws ClassNotFoundException {
-        return classLoader.findClass(fqn);
     }
 
     private void initMemoryClassLoader(Compilation compilation) throws IOException {

@@ -1,5 +1,7 @@
 package com.vmsmia.framework.component.rpc.restful.standard.generation.helper;
 
+import com.vmsmia.framework.component.rpc.restful.annotation.RequestHead;
+import com.vmsmia.framework.component.rpc.restful.annotation.RequestHeads;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -17,6 +19,8 @@ import javax.lang.model.util.SimpleTypeVisitor8;
 import javax.lang.model.util.TypeKindVisitor8;
 
 /**
+ * 注解解析帮助器.
+ *
  * @author bin.dong
  * @version 0.1 2024/4/12 10:40
  * @since 1.8
@@ -27,17 +31,27 @@ public class AnnotationHelper {
      * 获取指定元素上的注解信息.
      */
     public static List<AnnotationDefinition> parseAnnotations(Element element) {
-        return element.getAnnotationMirrors().stream()
-            .map(am -> {
-                TypeElement annotationTypeElement = (TypeElement) am.getAnnotationType().asElement();
-                AnnotationDefinition definition =
-                    new AnnotationDefinition(annotationTypeElement.getQualifiedName().toString());
+        List<? extends AnnotationMirror> annotationMirrors = element.getAnnotationMirrors();
+        List<AnnotationDefinition> definitions = new ArrayList<>(annotationMirrors.size());
+        annotationMirrors.forEach(am -> {
+            TypeElement annotationTypeElement = (TypeElement) am.getAnnotationType().asElement();
+            String fqn = annotationTypeElement.getQualifiedName().toString();
 
-                am.getElementValues().forEach((key, value) -> {
-                    definition.saveValue(key.getSimpleName().toString(), value.getValue());
-                });
-                return definition;
-            }).collect(Collectors.toList());
+            if (RequestHeads.class.getName().equals(fqn)) {
+                AnnotationValue headsAnnotationValue = am.getElementValues().values().iterator().next();
+                ((List<AnnotationMirror>) headsAnnotationValue.accept(new SafeAnnotationValueVisitor(), null))
+                    .stream()
+                    .map(headAnnotationMirror -> {
+                        AnnotationDefinition definition =
+                            fillAnnotationDefinitionValues(
+                                new AnnotationDefinition(RequestHead.class.getName()), headAnnotationMirror);
+                        return definition;
+                    }).forEach(definitions::add);
+            } else {
+                definitions.add(fillAnnotationDefinitionValues(new AnnotationDefinition(fqn), am));
+            }
+        });
+        return definitions;
     }
 
     /**
@@ -96,11 +110,19 @@ public class AnnotationHelper {
         return annotationDefinitions;
     }
 
+    private static AnnotationDefinition fillAnnotationDefinitionValues(AnnotationDefinition definition,
+                                                                       AnnotationMirror mirror) {
+        mirror.getElementValues().forEach((key, value) -> {
+            definition.saveValue(key.getSimpleName().toString(), value.accept(new SafeAnnotationValueVisitor(), null));
+        });
+        return definition;
+    }
+
     /*
     注解值读取器.
     所有非原生类型都是以FQN全限定名被返回.即是一个表示Class的字符串.
      */
-    static class SafeAnnotationValueVisitor extends SimpleAnnotationValueVisitor8<Object, Void> {
+    private static class SafeAnnotationValueVisitor extends SimpleAnnotationValueVisitor8<Object, Void> {
 
         @Override
         public Object visitType(TypeMirror t, Void unused) {
@@ -116,6 +138,16 @@ public class AnnotationHelper {
                     }, null);
                 }
             }, null);
+        }
+
+        @Override
+        public Object visitArray(List<? extends AnnotationValue> vals, Void unused) {
+            return vals.stream().map(v -> v.accept(this, null)).collect(Collectors.toList());
+        }
+
+        @Override
+        public Object visitAnnotation(AnnotationMirror a, Void unused) {
+            return a;
         }
 
         @Override

@@ -1,13 +1,15 @@
 package com.vmsmia.framework.component.rpc.restful;
 
 /**
+ * 基础类型的帮助类.
+ *
  * @author bin.dong
  * @version 0.1 2024/4/18 18:49
  * @since 1.8
  */
-public class ClassHelper {
+public class Primitives {
 
-    private ClassHelper() {
+    private Primitives() {
 
     }
 
@@ -35,6 +37,6 @@ public class ClassHelper {
      * @return true 是, false 不是.
      */
     public static boolean isPrimitiveOrWrapper(Class<?> type) {
-        return type.isPrimitive() || ClassHelper.isWrapperType(type);
+        return type.isPrimitive() || Primitives.isWrapperType(type);
     }
 }

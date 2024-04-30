@@ -1,8 +1,10 @@
-package com.vmsmia.framework.component.rpc.restful.standard.client.discovery;
+package com.vmsmia.framework.component.rpc.restful.discovery;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * 基于内存的服务发现实现,主要用以测试使用.
@@ -14,7 +16,7 @@ import java.util.Optional;
 public class InMemoryDiscover implements Discovery {
 
     private static final InMemoryDiscover INSTANCE = new InMemoryDiscover();
-    private final Map<String, Endpoint> endpoints;
+    private final Map<String, List<Endpoint>> endpoints;
 
     public static InMemoryDiscover getInstance() {
         return INSTANCE;
@@ -25,12 +27,19 @@ public class InMemoryDiscover implements Discovery {
     }
 
     @Override
-    public Optional<Endpoint> discover(String serviceName) {
-        return Optional.ofNullable(endpoints.get(serviceName));
+    public List<Endpoint> discover(String serviceName) {
+        List<Endpoint> es = endpoints.get(serviceName);
+        if (es == null) {
+            return Collections.emptyList();
+        } else {
+            Collections.sort(es);
+            return es;
+        }
     }
 
     public void register(String serviceName, Endpoint endpoint) {
-        endpoints.put(serviceName, endpoint);
+        List<Endpoint> es = this.endpoints.computeIfAbsent(serviceName, k -> new ArrayList<>());
+        es.add(endpoint);
     }
 
     public void reset() {

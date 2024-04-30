@@ -11,10 +11,34 @@
 
     <artifactId>rpc-restful-standard-provider</artifactId>
 
+    <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
+    </build>
+
     <dependencies>
         <dependency>
             <groupId>com.vmsmia.framework.component.rpc.restful</groupId>
+            <artifactId>rpc-restful-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.vmsmia.framework.component.rpc.restful</groupId>
             <artifactId>rpc-restful-contract</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.vmsmia.framework.component.rpc.restful</groupId>
+            <artifactId>rpc-restful-discovery</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.vmsmia.framework.component.rpc.restful</groupId>
+            <artifactId>rpc-restful-loadbalancer</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -32,7 +56,6 @@
         <dependency>
             <groupId>com.squareup</groupId>
             <artifactId>javapoet</artifactId>
-            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>

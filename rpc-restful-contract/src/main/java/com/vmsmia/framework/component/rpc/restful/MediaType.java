@@ -6,9 +6,10 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * 表示一个媒体类型.
@@ -19,11 +20,18 @@ import java.util.regex.Pattern;
  */
 public final class MediaType {
 
-    private static final Pattern MEDIA_TYPE_STRING_PATTERN =
-        Pattern.compile("^[a-zA-Z]+/[a-zA-Z0-9\\-+.]+(?:;\\s*[a-zA-Z0-9\\-]+=[a-zA-Z0-9\\-]+)?$");
-    private static final char TYPE_SEPARATOR = '/';
-    private static final char PARAM_SEPARATOR = ';';
-    private static final char PARAM_VALUE_SEPARATOR = '=';
+    /**
+     * 媒体的主类型和子类型的分隔符.
+     */
+    public static final char TYPE_SEPARATOR = '/';
+    /**
+     * 参数分隔符.
+     */
+    public static final char PARAM_SEPARATOR = ';';
+    /**
+     * 参数键值对分隔符.
+     */
+    public static final char PARAM_VALUE_SEPARATOR = '=';
 
     private String type;
     private String subType;
@@ -43,16 +51,8 @@ public final class MediaType {
         if (contentType == null || contentType.isEmpty()) {
             return MediaTypes.DEFAULT_MEDIA_TYPE;
         }
-        String useContentType = contentType.trim().toLowerCase();
-        assert MEDIA_TYPE_STRING_PATTERN != null;
-        Matcher matcher = MEDIA_TYPE_STRING_PATTERN.matcher(useContentType);
-        if (!matcher.matches()) {
-            throw new IllegalArgumentException(
-                String.format(
-                    "Invalid media type %s format. Expected 'type/subtype' or 'type/subtype; k=v'.", useContentType));
 
-        }
-        return new MediaType(contentType.toLowerCase());
+        return new MediaType(contentType);
     }
 
     public String getType() {
@@ -98,6 +98,24 @@ public final class MediaType {
     }
 
     @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        MediaType mediaType = (MediaType) o;
+        return Objects.equals(type, mediaType.type) && Objects.equals(subType, mediaType.subType)
+            && Objects.equals(args, mediaType.args);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(type, subType, args);
+    }
+
+    @Override
     public String toString() {
         StringBuilder buff = new StringBuilder();
         buff.append(type)
@@ -106,25 +124,20 @@ public final class MediaType {
 
         if (!this.args.isEmpty()) {
             buff.append(PARAM_SEPARATOR).append(' ');
-            for (Map.Entry<String, String> arg : this.args) {
-                buff.append(arg.getKey())
-                    .append(PARAM_VALUE_SEPARATOR)
-                    .append(arg.getValue())
-                    .append(PARAM_SEPARATOR)
-                    .append(' ');
-            }
+            buff.append(this.args.stream().map(arg -> arg.getKey() + PARAM_VALUE_SEPARATOR + arg.getValue())
+                .collect(Collectors.joining(PARAM_SEPARATOR + " ")));
         }
 
         return buff.toString();
     }
 
     // 目标为 application/json; charset=UTF-8; profile="user"; 这样的字符串.
-    private void parse(String contentType) {
+    private void parse(String mediaType) {
         List<String> segment = new LinkedList<>();
         StringBuilder buff = new StringBuilder();
         // 先按";"分割段
-        for (int i = 0; i < contentType.length(); i++) {
-            char c = contentType.charAt(i);
+        for (int i = 0; i < mediaType.length(); i++) {
+            char c = mediaType.charAt(i);
             if (c == PARAM_SEPARATOR) {
                 segment.add(buff.toString().trim());
                 buff.setLength(0);
@@ -145,6 +158,11 @@ public final class MediaType {
         type = typeSplitResult[leftValue];
         subType = typeSplitResult[rightValue];
 
+        // 无法解析出有效的类型和子类型.
+        if (type == null || type.isEmpty() || subType == null || subType.isEmpty()) {
+            throw new IllegalArgumentException(String.format("Invalid mediaType string %s.", mediaType));
+        }
+
         segment.remove(typeIndex);
 
         // args
@@ -152,9 +170,18 @@ public final class MediaType {
             this.args = Collections.emptyList();
         } else {
             this.args = new ArrayList<>(segment.size());
+            // 参数必须是以=号左右分割的.
+            final int argSplitStringSize = 2;
             segment.forEach(a -> {
                 String[] argSplitResult = split(a, PARAM_VALUE_SEPARATOR);
-                this.args.add(new AbstractMap.SimpleEntry<>(argSplitResult[leftValue], argSplitResult[rightValue]));
+
+                if (argSplitResult.length != argSplitStringSize) {
+                    throw new IllegalArgumentException(String.format("Invalid mediaType string %s.", mediaType));
+                }
+
+                this.args.add(
+                    // 注意这里的key可能在开头有参数分分隔的空格,需要去除.为了最大宽容这里也将值进行上前后空格去除.
+                    new AbstractMap.SimpleEntry<>(argSplitResult[leftValue].trim(), argSplitResult[rightValue].trim()));
             });
         }
     }
@@ -169,14 +196,14 @@ public final class MediaType {
         for (int i = 0; i < context.length(); i++) {
             char c = context.charAt(i);
             if (c == separator) {
-                results[leftValue] = buff.toString().toLowerCase();
+                results[leftValue] = buff.toString();
                 buff.setLength(0);
             } else {
                 buff.append(c);
             }
         }
 
-        results[rightValue] = buff.toString().toLowerCase();
+        results[rightValue] = buff.toString();
         return results;
     }
 }

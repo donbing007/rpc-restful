@@ -1,10 +1,14 @@
 package com.vmsmia.framework.component.rpc.restful.standard.client;
 
 import com.vmsmia.framework.component.rpc.restful.MediaTypes;
+import com.vmsmia.framework.component.rpc.restful.discovery.Endpoint;
 import com.vmsmia.framework.component.rpc.restful.serializer.BytesDeserializer;
+import com.vmsmia.framework.component.rpc.restful.stream.StreamResponseStatusException;
+import com.vmsmia.framework.component.rpc.restful.stream.StreamSubscriber;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.AbstractMap;
 import java.util.Collections;
@@ -17,6 +21,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import kotlin.Pair;
+import okhttp3.Call;
+import okhttp3.Callback;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -24,27 +30,27 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import okio.BufferedSink;
+import okio.BufferedSource;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
  * 基于OkHttp3的HTTP客户端类.
  * 提供了构建和执行HTTP请求的方法。
- * 支持GET、POST、PUT、DELETE、PATCH和HEAD请求方法。
+ * 支持GET、POST、PUT、DELETE、PATCH、HEAD和STREAM请求方法。
  *
  * @author bin.dong
  * @version 0.1 2024/4/12 16:43
  * @since 1.8
  */
 public class HttpClient {
-
-    private static final OkHttpClient OK_HTTP_CLIENT = new OkHttpClient();
     private static final String DEFAULT_BODY_MEDIA_TYPE = "application/json charset=utf-8";
 
     public static final char PATH_VARIABLE_PREFIX = '{';
     public static final char PATH_VARIABLE_SUFFIX = '}';
 
-    private String baseUrl;
+    private OkHttpClient okHttpClient;
+    private Endpoint endpoint;
     private String pathTemplate;
     private Map<String, String> pathVariables;
     private Map<String, String> queryParams;
@@ -57,6 +63,16 @@ public class HttpClient {
     private long writeTimeoutMs = 0;
 
     private HttpClient() {
+    }
+
+    /**
+     * 进行流式请求.
+     *
+     * @param subscriber 订阅者.
+     */
+    public void stream(StreamSubscriber subscriber) throws IOException {
+        Request req = doBuildRequestBuilder().get().build();
+        call(req, new StreamCallback(subscriber));
     }
 
     /**
@@ -186,16 +202,22 @@ public class HttpClient {
         return builder;
     }
 
-    private Response call(Request req) throws IOException {
-        OkHttpClient client = OK_HTTP_CLIENT.newBuilder()
+    private OkHttpClient buildSubOkHttpClient() {
+        return okHttpClient.newBuilder()
             .readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS)
             .writeTimeout(writeTimeoutMs, TimeUnit.MILLISECONDS)
             .connectTimeout(connectTimeoutMs, TimeUnit.MILLISECONDS)
             .build();
+    }
 
+    private void call(Request req, Callback callback) {
+        buildSubOkHttpClient().newCall(req).enqueue(callback);
+    }
+
+    private Response call(Request req) throws IOException {
         Response res = null;
         try {
-            res = client.newCall(req).execute();
+            res = buildSubOkHttpClient().newCall(req).execute();
             if (!res.isSuccessful()) {
                 throw new IOException(
                     String.format(
@@ -241,7 +263,11 @@ public class HttpClient {
     }
 
     private String generationUrl() {
-        return this.baseUrl + generatePathFromTemplate();
+        return String.format("%s://%s:%d%s",
+            this.endpoint.isTls() ? "HTTPS" : "HTTP",
+            this.endpoint.getHost(),
+            this.endpoint.getPort(),
+            generatePathFromTemplate());
     }
 
     /*
@@ -275,6 +301,9 @@ public class HttpClient {
                 String variable = this.pathVariables.get(variableName.toString());
                 if (variable != null) {
                     pathBuff.append(variable);
+                } else {
+                    throw new IllegalArgumentException(
+                        String.format("The path variable %s is not found.", variableName));
                 }
                 variableName.setLength(0);
             }
@@ -299,12 +328,87 @@ public class HttpClient {
         return pathBuff.toString();
     }
 
+    private static class StreamCallback implements Callback {
+
+        private final StreamSubscriber subscriber;
+
+        public StreamCallback(StreamSubscriber subscriber) {
+            this.subscriber = subscriber;
+        }
+
+        @Override
+        public void onFailure(Call call, IOException e) {
+            subscriber.onError(e);
+        }
+
+        @Override
+        public void onResponse(Call call, Response response) throws IOException {
+            try {
+                if (response.isSuccessful()) {
+
+                    boolean cancel = false;
+                    try (ResponseBody body = response.body()) {
+
+                        if (body == null) {
+                            subscriber.onStart(MediaTypes.DEFAULT_MEDIA_TYPE);
+                            subscriber.onComplete();
+                            return;
+                        }
+
+                        com.vmsmia.framework.component.rpc.restful.MediaType mediaType = body.contentType() != null
+                            ? com.vmsmia.framework.component.rpc.restful.MediaType.create(body.contentType().toString())
+                            : MediaTypes.DEFAULT_MEDIA_TYPE;
+                        subscriber.onStart(mediaType);
+
+                        int readBuffSize = 0;
+                        if (subscriber.readBuffSize() <= 0) {
+                            readBuffSize = 1024;
+                        } else {
+                            readBuffSize = subscriber.readBuffSize();
+                        }
+
+                        try (BufferedSource source = body.source()) {
+                            source.request(Long.MAX_VALUE);
+
+                            ByteBuffer readBuff = ByteBuffer.allocate(readBuffSize);
+
+                            /* cancel的状态表示和 StreamSubscriber.onNext 方法的返回是相反的. */
+                            while (!cancel) {
+                                int readSize = source.read(readBuff);
+                                if (readSize == -1) {
+                                    break;
+                                }
+
+                                readBuff.flip();
+                                cancel = !subscriber.onNext(readBuff);
+                                readBuff.clear();
+                            }
+                        } catch (IOException ex) {
+                            subscriber.onError(ex);
+                            return;
+                        }
+                    }
+
+                    if (cancel) {
+                        subscriber.onCancel();
+                    } else {
+                        subscriber.onComplete();
+                    }
+                } else {
+                    subscriber.onError(new StreamResponseStatusException(response.code()));
+                }
+            } finally {
+                response.close();
+            }
+        }
+    }
+
     /**
      * 建造者。提供了一系列用于构建和配置HttpClient实例的方法.
      */
     public static final class Builder {
-        private String baseUrl = "http://127.0.0.1:8080";
-        private String pathTemplate = "";
+        private Endpoint endpoint = Endpoint.defaultEndpoint();
+        private String pathTemplate = "/";
         private Map<String, String> pathVariables = Collections.emptyMap();
         private Map<String, String> queryParams = Collections.emptyMap();
         private List<Map.Entry<String, String>> headers = Collections.emptyList();
@@ -314,6 +418,7 @@ public class HttpClient {
         private long readTimeoutMs = 5000L;
         private long connectTimeoutMs = 5000L;
         private long writeTimeoutMs = 3000L;
+        private OkHttpClient okHttpClient;
 
         private Builder() {
         }
@@ -322,8 +427,13 @@ public class HttpClient {
             return new Builder();
         }
 
-        public Builder withBaseUrl(String baseUrl) {
-            this.baseUrl = baseUrl;
+        public Builder withOkHttpClient(OkHttpClient okHttpClient) {
+            this.okHttpClient = okHttpClient;
+            return this;
+        }
+
+        public Builder withEndpoint(Endpoint endpoint) {
+            this.endpoint = endpoint;
             return this;
         }
 
@@ -382,7 +492,7 @@ public class HttpClient {
          */
         public HttpClient build() {
             HttpClient httpClient = new HttpClient();
-            httpClient.baseUrl = this.baseUrl;
+            httpClient.endpoint = this.endpoint;
             httpClient.bodyMediaType = this.bodyMediaType;
             httpClient.headers = this.headers;
             httpClient.writeTimeoutMs = this.writeTimeoutMs;
@@ -393,6 +503,11 @@ public class HttpClient {
             httpClient.pathTemplate = this.pathTemplate;
             httpClient.queryParams = this.queryParams;
             httpClient.pathVariables = this.pathVariables;
+            if (this.okHttpClient == null) {
+                httpClient.okHttpClient = new OkHttpClient();
+            } else {
+                httpClient.okHttpClient = this.okHttpClient;
+            }
             return httpClient;
         }
     }

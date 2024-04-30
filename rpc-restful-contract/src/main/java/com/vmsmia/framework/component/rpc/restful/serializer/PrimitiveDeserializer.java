@@ -1,6 +1,6 @@
 package com.vmsmia.framework.component.rpc.restful.serializer;
 
-import com.vmsmia.framework.component.rpc.restful.ClassHelper;
+import com.vmsmia.framework.component.rpc.restful.Primitives;
 
 /**
  * 针对基础类型的解码器.
@@ -22,7 +22,7 @@ public class PrimitiveDeserializer implements BytesDeserializer {
 
     @Override
     public <T> T deserialize(byte[] data, Class<T> expectType, Object... attachments) {
-        if (!ClassHelper.isPrimitiveOrWrapper(expectType)) {
+        if (!Primitives.isPrimitiveOrWrapper(expectType)) {
             throw new IllegalArgumentException("Unsupported type for this deserializer");
         }
 

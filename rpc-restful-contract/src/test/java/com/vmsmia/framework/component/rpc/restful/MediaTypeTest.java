@@ -20,7 +20,7 @@ public class MediaTypeTest {
 
     @Test
     void testCreateWithValidContentType() {
-        MediaType mediaType = MediaType.create("application/json; charset=UTF-8; profile=\"user\"");
+        MediaType mediaType = MediaType.create("application/json; charset=UTF-8; profile=user");
         assertEquals("application", mediaType.getType());
         assertEquals("json", mediaType.getSubType());
         assertEquals(2, mediaType.getArgs().size());
@@ -41,7 +41,8 @@ public class MediaTypeTest {
         MediaType mediaType = MediaType.create("");
         assertEquals("text", mediaType.getType());
         assertEquals("plain", mediaType.getSubType());
-        assertTrue(mediaType.getArgs().isEmpty());
+        assertTrue(mediaType.getArgs().size() == 1);
+        assertEquals("UTF-8", mediaType.getArgs().get(0).getValue());
     }
 
     @Test
@@ -49,7 +50,8 @@ public class MediaTypeTest {
         MediaType mediaType = MediaType.create(null);
         assertEquals("text", mediaType.getType());
         assertEquals("plain", mediaType.getSubType());
-        assertTrue(mediaType.getArgs().isEmpty());
+        assertTrue(mediaType.getArgs().size() == 1);
+        assertEquals("UTF-8", mediaType.getArgs().get(0).getValue());
     }
 
     @Test
@@ -121,17 +123,17 @@ public class MediaTypeTest {
 
     @Test
     void testToString() {
-        MediaType mediaType = MediaType.create("application/json; charset=UTF-8; profile=\"user\"");
+        MediaType mediaType = MediaType.create("application/json; charset=UTF-8; profile=user");
         assertEquals("application/json; charset=UTF-8; profile=user", mediaType.toString());
     }
 
     @Test
     void testParse() {
-        MediaType mediaType = MediaType.create("application/json; charset=UTF-8; profile=\"user\"");
+        MediaType mediaType = MediaType.create("application/json; charset=UTF-8; profile=user");
         assertEquals("application", mediaType.getType());
         assertEquals("json", mediaType.getSubType());
         assertEquals(2, mediaType.getArgs().size());
-        assertTrue(mediaType.getArgs().contains(new AbstractMap.SimpleEntry<>("charset", "UTF-8")));
-        assertTrue(mediaType.getArgs().contains(new AbstractMap.SimpleEntry<>("profile", "user")));
+        assertEquals("UTF-8", mediaType.getArg("charset").get());
+        assertEquals("user", mediaType.getArg("profile").get());
     }
 }

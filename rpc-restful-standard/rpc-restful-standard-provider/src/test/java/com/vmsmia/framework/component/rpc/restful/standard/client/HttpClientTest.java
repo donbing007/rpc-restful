@@ -3,7 +3,11 @@ package com.vmsmia.framework.component.rpc.restful.standard.client;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.vmsmia.framework.component.rpc.restful.MediaType;
+import com.vmsmia.framework.component.rpc.restful.discovery.Endpoint;
 import com.vmsmia.framework.component.rpc.restful.serializer.string.json.Json;
+import com.vmsmia.framework.component.rpc.restful.standard.utils.MockStreamSubscriber;
+import com.vmsmia.framework.component.rpc.restful.standard.utils.RandomUtils;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.AbstractMap;
@@ -48,7 +52,7 @@ public class HttpClientTest {
 
 
         HttpClient client = HttpClient.Builder.anBuilder()
-            .withBaseUrl("http://" + mockWebServer.getHostName() + ":" + mockWebServer.getPort())
+            .withEndpoint(new Endpoint(mockWebServer.getHostName(), mockWebServer.getPort(), false))
             .withPathTemplate("/data/{name}")
             .withPathVariables(Collections.singletonMap("name", "test"))
             .withQueryParams(Collections.singletonMap("id", "123"))
@@ -74,7 +78,7 @@ public class HttpClientTest {
 
         Data submitData = new Data("submit", 10);
         HttpClient client = HttpClient.Builder.anBuilder()
-            .withBaseUrl("http://" + mockWebServer.getHostName() + ":" + mockWebServer.getPort())
+            .withEndpoint(new Endpoint(mockWebServer.getHostName(), mockWebServer.getPort(), false))
             .withPathTemplate("/data/{name}")
             .withPathVariables(Collections.singletonMap("name", "test"))
             .withQueryParams(Collections.singletonMap("id", "123"))
@@ -90,7 +94,8 @@ public class HttpClientTest {
         assertEquals("/data/test?id=123", recordedRequest.getPath());
         assertEquals("test", recordedRequest.getHeader("visionmc"));
         assertEquals(submitData,
-            Json.deserialize(new String(recordedRequest.getBody().readByteArray(), StandardCharsets.UTF_8), Data.class));
+            Json.deserialize(new String(recordedRequest.getBody().readByteArray(), StandardCharsets.UTF_8),
+                Data.class));
     }
 
     @Test
@@ -99,7 +104,7 @@ public class HttpClientTest {
             .addHeader("Custom-Header", "value"));
 
         HttpClient client = HttpClient.Builder.anBuilder()
-            .withBaseUrl("http://" + mockWebServer.getHostName() + ":" + mockWebServer.getPort())
+            .withEndpoint(new Endpoint(mockWebServer.getHostName(), mockWebServer.getPort(), false))
             .withPathTemplate("/data")
             .withHeaders(Collections.singletonList(new AbstractMap.SimpleEntry<>("visionmc", "test")))
             .build();
@@ -121,7 +126,7 @@ public class HttpClientTest {
 
         Data submitData = new Data("submit", 20);
         HttpClient client = HttpClient.Builder.anBuilder()
-            .withBaseUrl("http://" + mockWebServer.getHostName() + ":" + mockWebServer.getPort())
+            .withEndpoint(new Endpoint(mockWebServer.getHostName(), mockWebServer.getPort(), false))
             .withPathTemplate("/data")
             .withBody(Json.serialize(submitData).getBytes(StandardCharsets.UTF_8))
             .withBodyMediaType("application/json; charset=utf8")
@@ -135,7 +140,8 @@ public class HttpClientTest {
         assertEquals("/data", recordedRequest.getPath());
         assertEquals("test", recordedRequest.getHeader("visionmc"));
         assertEquals(submitData,
-            Json.deserialize(new String(recordedRequest.getBody().readByteArray(), StandardCharsets.UTF_8), Data.class));
+            Json.deserialize(new String(recordedRequest.getBody().readByteArray(), StandardCharsets.UTF_8),
+                Data.class));
     }
 
     @Test
@@ -148,7 +154,7 @@ public class HttpClientTest {
 
         Data submitData = new Data("submit", 30);
         HttpClient client = HttpClient.Builder.anBuilder()
-            .withBaseUrl("http://" + mockWebServer.getHostName() + ":" + mockWebServer.getPort())
+            .withEndpoint(new Endpoint(mockWebServer.getHostName(), mockWebServer.getPort(), false))
             .withPathTemplate("/data")
             .withHeaders(Collections.singletonList(new AbstractMap.SimpleEntry<>("visionmc", "test")))
             .withBody(Json.serialize(submitData).getBytes(StandardCharsets.UTF_8))
@@ -162,7 +168,8 @@ public class HttpClientTest {
         assertEquals("/data", recordedRequest.getPath());
         assertEquals("test", recordedRequest.getHeader("visionmc"));
         assertEquals(submitData,
-            Json.deserialize(new String(recordedRequest.getBody().readByteArray(), StandardCharsets.UTF_8), Data.class));
+            Json.deserialize(new String(recordedRequest.getBody().readByteArray(), StandardCharsets.UTF_8),
+                Data.class));
     }
 
     @Test
@@ -174,7 +181,7 @@ public class HttpClientTest {
             .addHeader("Content-Type", "application/json; charset=utf8"));
 
         HttpClient client = HttpClient.Builder.anBuilder()
-            .withBaseUrl("http://" + mockWebServer.getHostName() + ":" + mockWebServer.getPort())
+            .withEndpoint(new Endpoint(mockWebServer.getHostName(), mockWebServer.getPort(), false))
             .withPathTemplate("/data/{id}")
             .withPathVariables(Collections.singletonMap("id", "4"))
             .build();
@@ -184,6 +191,34 @@ public class HttpClientTest {
         assertEquals("DELETE", recordedRequest.getMethod());
         assertEquals("/data/4", recordedRequest.getPath());
         assertEquals(expectedData, result);
+    }
+
+    @Test
+    public void testStream() throws Exception {
+        String data = RandomUtils.generateRandomString(512, 1024);
+        mockWebServer.enqueue(new MockResponse()
+            .setChunkedBody(data, 256)
+            .addHeader("Content-Type", "text/plain; charset=utf8"));
+
+        // 创建HttpClient实例并调用stream方法
+        HttpClient client = HttpClient.Builder.anBuilder()
+            .withEndpoint(new Endpoint(mockWebServer.getHostName(), mockWebServer.getPort(), false))
+            .withPathTemplate("/stream")
+            .build();
+        MockStreamSubscriber subscriber = new MockStreamSubscriber(1024);
+        client.stream(subscriber);
+
+        // 等待结束.
+        while (!subscriber.isFinished()) {
+            Thread.sleep(100);
+        }
+
+        RecordedRequest recordedRequest = mockWebServer.takeRequest();
+        assertEquals("/stream", recordedRequest.getPath());
+        assertEquals("GET", recordedRequest.getMethod());
+        assertEquals(MediaType.create("text/plain; charset=utf8"), subscriber.getMediaType());
+        assertEquals(data, subscriber.getStringValue());
+        assertEquals(data.length(), subscriber.getStringValue().length());
     }
 
     private static class Data {

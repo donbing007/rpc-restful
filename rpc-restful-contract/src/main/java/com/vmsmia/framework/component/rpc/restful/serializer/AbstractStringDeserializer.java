@@ -4,6 +4,8 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 
 /**
+ * 来源数据是字会串的byte数组类型的反序列化器.
+ *
  * @author bin.dong
  * @version 0.1 2024/4/18 11:24
  * @since 1.8

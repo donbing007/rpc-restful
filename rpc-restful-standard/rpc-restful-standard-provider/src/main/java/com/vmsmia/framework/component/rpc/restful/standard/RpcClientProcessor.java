@@ -1,22 +1,31 @@
 package com.vmsmia.framework.component.rpc.restful.standard;
 
 import com.google.auto.service.AutoService;
+import com.squareup.javapoet.CodeBlock;
 import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
-import com.vmsmia.framework.component.rpc.restful.standard.client.discovery.Discovery;
+import com.vmsmia.framework.component.rpc.restful.discovery.Discovery;
+import com.vmsmia.framework.component.rpc.restful.loadbalancer.LoadBalancer;
+import com.vmsmia.framework.component.rpc.restful.loadbalancer.LoadBalancerFactory;
+import com.vmsmia.framework.component.rpc.restful.loadbalancer.LoadBalancers;
 import com.vmsmia.framework.component.rpc.restful.standard.generation.MethodGenerationStrategy;
 import com.vmsmia.framework.component.rpc.restful.standard.generation.MethodGenerationStrategyFactory;
+import com.vmsmia.framework.component.rpc.restful.standard.generation.helper.AnnotationDefinition;
+import com.vmsmia.framework.component.rpc.restful.standard.generation.helper.AnnotationHelper;
 import java.io.IOException;
+import java.io.InputStream;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Collectors;
 import javax.annotation.Resource;
 import javax.annotation.processing.AbstractProcessor;
@@ -33,13 +42,63 @@ import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.Name;
+import javax.lang.model.element.PackageElement;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
+import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
+import okhttp3.OkHttpClient;
 
 /**
+ * RpcClientProcessor是一个自定义的注解处理器，专门用于处理
+ * {@code com.vmsmia.framework.component.rpc.restful.annotation.RestfulClient}注解.
+ * 它在编译时自动触发，生成目标接口的实现类，进而支持RPC调用的简化和自动化.
+ * <p>
+ * 当一个接口使用了{@code RestfulClient}注解后，此处理器将为该接口生成一个具体的实现类，该实现类包含了通过HTTP客户端调用远程服务的必要逻辑.
+ * 生成的实现类包含对okhttpclient和服务发现机制的引用，以便实现动态的服务调用.
+ * </p>
+ *
+ * <h2>使用说明</h2>
+ * <ol>
+ *     <li>将 {@code @RestfulClient} 应用于任何接口定义</li>
+ *     <li>编译项目时，注解处理器自动运行，并为每个标注的接口生成实现类</li>
+ *     <li>生成的类会在指定的包下(RpcClientProcessor.GENERATION_PACKAGE)，类名默认为接口名加Impl后缀，也可通过配置修改</li>
+ * </ol>
+ *
+ * <h2>配置项</h2>
+ * 此处理器允许通过注解处理器选项进行配置，目前支持的配置项包括：
+ * <ul>
+ *     <li>{@code useFixedClassName}: 决定生成的类名是否固定.若为true，则遵循简单命名规则{@code {接口名}Impl}；
+ *     若为false，则生成的类名会加上目标接口包名去除"."后的字符串做为后缀，以确保唯一性.</li>
+ * </ul>
+ *
+ * <h2>类成员简介</h2>
+ * <ul>
+ *     <li>{@code GENERATION_PACKAGE}: 生成代码的目标包名</li>
+ *     <li>{@code DISCOVER_MEMBER_VARIABLE_NAME}: 用于服务发现的成员变量名</li>
+ *     <li>{@code OKHTTPCLIENT_MEMBER_VARIABLE_NAME}: 用于HTTP请求的okhttpclient成员变量名</li>
+ *     <li>{@code filer}: 文件生成器，用于创建新文件</li>
+ *     <li>{@code messager}: 用于在编译期间打印信息</li>
+ *     <li>{@code types}: 类型工具类，用于类型处理</li>
+ *     <li>{@code elements}: 元素工具类，用于操作元素</li>
+ *     <li>{@code configuration}: 处理器配置信息</li>
+ * </ul>
+ *
+ * <h2>关键方法</h2>
+ * <ul>
+ *    <li>{@code init}: 初始化处理器，获取必要的处理环境工具</li>
+ *    <li>{@code process}: 主要处理方法，扫描带有{@code RestfulClient}注解的接口，并为每个接口生成实现类</li>
+ *    <li>{@code generateImpl}: 为指定接口生成实现类定义</li>
+ *    <li>{@code generateDiscoverField}: 生成服务发现机制的字段定义</li>
+ *    <li>{@code generateOkHttpClientField}: 生成okhttpclient成员变量的字段定义</li>
+ *    <li>{@code collectInterfaceMethods}: 收集接口及其父接口中的所有方法</li>
+ * </ul>
+ *
+ * <h2>注意事项</h2>
+ * 生成的实现类代码不应手动修改，因为它们在编译时自动生成，且有可能在之后的编译中被覆盖.
+ *
  * @author bin.dong
  * @version 0.1 2024/4/8 16:20
  * @since 1.8
@@ -54,21 +113,35 @@ public class RpcClientProcessor extends AbstractProcessor {
      */
     public static final String GENERATION_PACKAGE = "com.vmsmia.framework.component.rpc.restful.standard.generation";
     /**
+     * 负载均衡器成员变量名称.
+     */
+    public static final String LOAD_BALANCER_VARIABLE_NAME = "loadBalancer";
+    /**
      * 服务发现成员变量名称.
      */
     public static final String DISCOVER_MEMBER_VARIABLE_NAME = "discovery";
+    /**
+     * okhttpclient成员变量名称.
+     */
+    public static final String OKHTTPCLIENT_MEMBER_VARIABLE_NAME = "okHttpClient";
     private Filer filer;
     private Messager messager;
     private Types types;
+    private Elements elements;
     private Configuration configuration;
+    private String version;
+    private String jdkVersion;
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
         super.init(processingEnv);
+        this.elements = processingEnv.getElementUtils();
         this.filer = processingEnv.getFiler();
         this.messager = processingEnv.getMessager();
         this.types = processingEnv.getTypeUtils();
         this.configuration = new Configuration(processingEnv.getOptions());
+        this.version = readVersion();
+        this.jdkVersion = readJdkVersion();
     }
 
     @Override
@@ -79,8 +152,6 @@ public class RpcClientProcessor extends AbstractProcessor {
                 if (el.getKind() == ElementKind.INTERFACE) {
                     TypeElement interfaceEl = (TypeElement) el;
                     TypeSpec classSpec = generateImpl(interfaceEl);
-
-                    System.out.println(classSpec.toString());
 
                     messager.printMessage(
                         Diagnostic.Kind.NOTE,
@@ -118,16 +189,69 @@ public class RpcClientProcessor extends AbstractProcessor {
             collectInterfaceMethods(interfaceEl)
                 .stream()
                 .map(methodElement -> generateMethodImpl(interfaceEl, methodElement))
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
-        Name name = interfaceEl.getSimpleName();
-        String implName = buildImplName(name);
+        String implName = buildImplName(interfaceEl);
         return TypeSpec.classBuilder(implName)
             .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
             .addSuperinterface(TypeName.get(interfaceEl.asType()))
+            .addField(generateOkHttpClientField())
             .addField(generateDiscoverField())
+            .addField(generateLoadBalancerField())
+            // 无参构建函数.
+            .addMethod(generatedConstructor(interfaceEl))
             .addMethods(methodSpecs)
+            .addJavadoc(buildClassJavaDoc())
             .build();
+    }
+
+    private CodeBlock buildClassJavaDoc() {
+        LocalDateTime generationTime = LocalDateTime.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        return CodeBlock.builder()
+            .add("<p>This code is generated by $L.</p>\n", "rpc-restful-standard")
+            .add("<p>Generator version: $L</p>\n", this.version)
+            .add("<p>Minimum JDK version required: $L</p>\n", this.jdkVersion)
+            .add("<p>Generation time: $L</p>\n", generationTime.format(formatter))
+            .add("\n")
+            .add("<p><strong>Warning:</strong> Do not modify this code manually.</p>\n")
+            .build();
+    }
+
+    // 无参构造函数.
+    private MethodSpec generatedConstructor(TypeElement interfaceEl) {
+        String loadBalancerName = parseLoadBalancerName(interfaceEl);
+
+        return MethodSpec.constructorBuilder()
+            .addModifiers(Modifier.PUBLIC)
+            // 初始化名为 LOAD_BALANCER_VARIABLE_NAME 的loadBalancer成员变量.
+            .addCode(
+                CodeBlock.builder()
+                    // loadBalancer = LoadBalancerFactory.getLoadBalancer(loadBalancerName)
+                    .addStatement("$L = $T.getLoadBalancer($S)",
+                        LOAD_BALANCER_VARIABLE_NAME, LoadBalancerFactory.class, loadBalancerName)
+                    .build()
+            )
+            .build();
+    }
+
+    private String parseLoadBalancerName(TypeElement interfaceEl) {
+        List<AnnotationDefinition> ads = AnnotationHelper.parseClassAnnotation(interfaceEl);
+        String loadBalancerName = ads.stream()
+            .filter(ad -> com.vmsmia.framework.component.rpc.restful.annotation.LoadBalancer.class.getName()
+                .equals(ad.getFqn()))
+            .map(ad -> ad.getValue("value").orElse(null))
+            .filter(Objects::nonNull)
+            .map(Object::toString)
+            .findFirst()
+            .orElse(null);
+
+        if (loadBalancerName == null) {
+            return LoadBalancers.LEAST_REQUEST;
+        } else {
+            return loadBalancerName;
+        }
     }
 
     /*
@@ -144,16 +268,40 @@ public class RpcClientProcessor extends AbstractProcessor {
             .build();
     }
 
-    private String buildImplName(Name interfaceName) {
+    /*
+    生成如下成员变量用以处理okhttpclient.
+    <code>
+      @Resource
+      private OkHttpClient okHttpClient;
+    </code>
+     */
+    private FieldSpec generateOkHttpClientField() {
+        return FieldSpec.builder(OkHttpClient.class, OKHTTPCLIENT_MEMBER_VARIABLE_NAME)
+            .addModifiers(Modifier.PRIVATE)
+            .addAnnotation(Resource.class)
+            .build();
+    }
+
+    private FieldSpec generateLoadBalancerField() {
+        return FieldSpec.builder(LoadBalancer.class, LOAD_BALANCER_VARIABLE_NAME)
+            .addModifiers(Modifier.PRIVATE)
+            .build();
+    }
+
+    private String buildImplName(TypeElement interfaceEl) {
+        Name interfaceName = interfaceEl.getSimpleName();
         if (configuration.isUseFixedClassName()) {
-            // {接口类名}Impl_{UUID},假如接口名为 TestInterface,则实现类名为 TestInterfaceImpl
+            // {接口类名}Impl,假如接口名为 TestInterface,则实现类名为 TestInterfaceImpl
             return String.format("%sImpl", interfaceName.toString());
         } else {
-            // {接口类名}Impl_{UUID},假如接口名为 TestInterface,则实现类名为 TestInterfaceImpl_4d9358eefe8a4b1985b565b667d5c2eb
+            PackageElement packageElement = elements.getPackageOf(interfaceEl);
+            String packageName = packageElement.getQualifiedName().toString().replaceAll("\\.", "");
+            // {接口类名}Impl_{接口包名去除"."组成的字串},
+            // 假如接口名为 com.vmsmai.TestInterface,则实现类名为 TestInterfaceImpl_comvmsmai
             return String.format(
                 "%sImpl_%s",
                 interfaceName.toString(),
-                UUID.randomUUID().toString().replaceAll("-", ""));
+                packageName);
         }
     }
 
@@ -235,5 +383,22 @@ public class RpcClientProcessor extends AbstractProcessor {
                 return Boolean.parseBoolean(useFixedClassName);
             }
         }
+    }
+
+    private String readVersion() {
+        Properties properties = new Properties();
+        try {
+            try (InputStream input = getClass().getResourceAsStream("/version.properties")) {
+                properties.load(input);
+            }
+            return properties.getProperty("version");
+        } catch (Exception e) {
+            messager.printMessage(Diagnostic.Kind.WARNING, "Can not read version.");
+            return "UNKNOWN";
+        }
+    }
+
+    private String readJdkVersion() {
+        return System.getProperty("java.version");
     }
 }
