@@ -108,10 +108,6 @@ import javax.tools.Diagnostic;
 public abstract class AbstractMethodGenerationStrategy implements MethodGenerationStrategy {
 
     /**
-     * 注解默认值的属性名称.
-     */
-    private static final String ANNOTATION_DEFAULT_FIELD_NAME = "value";
-    /**
      * 注解序列化属性的名称.
      */
     private static final String ANNOTATION_SERIALIZER_FIELD_NAME = "serializer";
@@ -120,7 +116,7 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
     private static final String PATH_TEMPLATE_VARIABLE_NAME = "pathTemplate";
     private static final String PATH_VARIABLE_NAME = "pathVariables";
     private static final String QUERY_PARAM_VARIABLE_NAME = "queryParams";
-    private static final String HEADER_VARIABLE_NAME = "headers";
+    private static final String HEAD_VARIABLE_NAME = "heads";
     private static final String BODY_VARIABLE_NAME = "body";
     private static final String BODY_MEDIA_TYPE_VARIABLE_NAME = "bodyMediaType";
     private static final String HTTP_CLIENT_BUILDER_VARIABLE_NAME = "httpClientBuilder";
@@ -328,7 +324,7 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
         String discoverDefinition =
             getFirstAnnotationDefinition(classAnnotationDefinitions, RestfulClient.class)
                 .get()
-                .getValue(ANNOTATION_DEFAULT_FIELD_NAME)
+                .getValue(AnnotationHelper.ANNOTATION_DEFAULT_FIELD_NAME)
                 .get()
                 .toString();
 
@@ -380,8 +376,9 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
 
         } else {
             // 不进行服务发现直接访问.
-            builder.addStatement("$T $L = $T.parse($S)",
-                    Endpoint.class, Endpoint.class, discoverDefinition)
+            builder
+                .addStatement("$T $L = $T.parse($S)",
+                    Endpoint.class, ENDPOINT_VARIABLE_NAME, Endpoint.class, discoverDefinition)
                 .add(callCode);
         }
 
@@ -403,7 +400,7 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
             .addStatement("$L.withPathTemplate($L)", HTTP_CLIENT_BUILDER_VARIABLE_NAME, PATH_TEMPLATE_VARIABLE_NAME)
             .addStatement("$L.withPathVariables($L)", HTTP_CLIENT_BUILDER_VARIABLE_NAME, PATH_VARIABLE_NAME)
             .addStatement("$L.withQueryParams($L)", HTTP_CLIENT_BUILDER_VARIABLE_NAME, QUERY_PARAM_VARIABLE_NAME)
-            .addStatement("$L.withHeaders($L)", HTTP_CLIENT_BUILDER_VARIABLE_NAME, HEADER_VARIABLE_NAME)
+            .addStatement("$L.withHeaders($L)", HTTP_CLIENT_BUILDER_VARIABLE_NAME, HEAD_VARIABLE_NAME)
             .addStatement("$L.withBody($L)", HTTP_CLIENT_BUILDER_VARIABLE_NAME, BODY_VARIABLE_NAME)
             .addStatement("$L.withBodyMediaType($L)", HTTP_CLIENT_BUILDER_VARIABLE_NAME, BODY_MEDIA_TYPE_VARIABLE_NAME)
             .addStatement("$L.withReturnDeserializer($L)",
@@ -468,7 +465,7 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
         String pathTemplate =
             (String) getFirstAnnotationDefinition(methodAnnotationDefinitions, Path.class)
                 .get()
-                .getValue(ANNOTATION_DEFAULT_FIELD_NAME)
+                .getValue(AnnotationHelper.ANNOTATION_DEFAULT_FIELD_NAME)
                 .get();
 
         return CodeBlock.builder()
@@ -494,8 +491,8 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
                 .stream()
                 .map(d -> (ParameterAnnotationDefinition) d)
                 .forEach(d -> {
-                    String pathVariableName = d.getValue(ANNOTATION_DEFAULT_FIELD_NAME).get().equals("")
-                        ? d.getParameterName() : (String) d.getValue(ANNOTATION_DEFAULT_FIELD_NAME).get();
+                    String pathVariableName = d.getValue(AnnotationHelper.ANNOTATION_DEFAULT_FIELD_NAME).get().equals("")
+                        ? d.getParameterName() : (String) d.getValue(AnnotationHelper.ANNOTATION_DEFAULT_FIELD_NAME).get();
 
 
                     codeBlockBuilder.addStatement(
@@ -532,7 +529,7 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
                 .stream()
                 .map(d -> (ParameterAnnotationDefinition) d)
                 .forEach(d -> {
-                    String annotationValue = (String) d.getValue(ANNOTATION_DEFAULT_FIELD_NAME).get();
+                    String annotationValue = (String) d.getValue(AnnotationHelper.ANNOTATION_DEFAULT_FIELD_NAME).get();
                     String queryParamName = annotationValue.isEmpty() ? d.getParameterName() : annotationValue;
 
                     codeBlockBuilder.addStatement(
@@ -602,12 +599,12 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
         if (haveAnnotation(methodAnnotationDefinitions, RequestHead.class)) {
             codeBlockBuilder.addStatement(
                 "$T<$T<$T, $T>> $L = new $T<>()",
-                List.class, Map.Entry.class, String.class, String.class, HEADER_VARIABLE_NAME, ArrayList.class);
+                List.class, Map.Entry.class, String.class, String.class, HEAD_VARIABLE_NAME, ArrayList.class);
             getAllAnnotationDefinitions(methodAnnotationDefinitions, RequestHead.class).forEach(d -> {
                 String key = (String) d.getValue("key").orElse("");
                 String value = (String) d.getValue("val").orElse("");
                 if (!isStringNullOrEmpty(key)) {
-                    codeBlockBuilder.addStatement("$L.add(new $T($S, $S))", HEADER_VARIABLE_NAME,
+                    codeBlockBuilder.addStatement("$L.add(new $T($S, $S))", HEAD_VARIABLE_NAME,
                         AbstractMap.SimpleEntry.class, key, value);
                 }
             });
@@ -618,7 +615,7 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
                 Map.Entry.class,
                 String.class,
                 String.class,
-                HEADER_VARIABLE_NAME,
+                HEAD_VARIABLE_NAME,
                 Collections.class.getName());
         }
         return codeBlockBuilder.build();
@@ -630,13 +627,16 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
             AnnotationDefinition definition =
                 getFirstAnnotationDefinition(methodAnnotationDefinitions, Timeout.class).get();
 
+            /*
+            Timeout标准的值都有默认值,所以可以安全的Optional.get()调用.
+             */
             return codeBlockBuilder
                 .addStatement("$T $L = $L", long.class, READ_TIMEOUT_MS_VARIABLE_NAME,
-                    definition.getValue("readTimeoutMs"))
+                    definition.getValue("readTimeoutMs").get())
                 .addStatement("$T $L = $L", long.class, WRITE_TIMEOUT_MS_VARIABLE_NAME,
-                    definition.getValue("writeTimeoutMs"))
+                    definition.getValue("writeTimeoutMs").get())
                 .addStatement("$T $L = $L", long.class, CONNECT_TIMEOUT_MS_VARIABLE_NAME,
-                    definition.getValue("connectTimeoutMs"))
+                    definition.getValue("connectTimeoutMs").get())
                 .build();
 
         } else {
@@ -665,7 +665,7 @@ public abstract class AbstractMethodGenerationStrategy implements MethodGenerati
             AnnotationDefinition definition =
                 getFirstAnnotationDefinition(methodAnnotationDefinitions, ReturnDeserializer.class).get();
 
-            Optional<?> value = definition.getValue(ANNOTATION_DEFAULT_FIELD_NAME);
+            Optional<?> value = definition.getValue(AnnotationHelper.ANNOTATION_DEFAULT_FIELD_NAME);
             if (value.isPresent()) {
                 return builder
                     .addStatement("$T $L = $L.getInstance()",

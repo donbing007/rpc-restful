@@ -7,6 +7,7 @@ import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
+import com.vmsmia.framework.component.rpc.restful.annotation.RestfulClient;
 import com.vmsmia.framework.component.rpc.restful.discovery.Discovery;
 import com.vmsmia.framework.component.rpc.restful.loadbalancer.LoadBalancer;
 import com.vmsmia.framework.component.rpc.restful.loadbalancer.LoadBalancerFactory;
@@ -24,6 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -192,18 +194,33 @@ public class RpcClientProcessor extends AbstractProcessor {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
+        AnnotationDefinition definition = AnnotationHelper.parseClassAnnotation(interfaceEl)
+            .stream()
+            .filter(d -> d.getFqn().equals(RestfulClient.class.getCanonicalName()))
+            .findFirst()
+            // 一定会有这个注释,否则整个机制都不会有效.
+            .get();
+        Optional<?> value = definition.getValue(AnnotationHelper.ANNOTATION_DEFAULT_FIELD_NAME);
+        boolean discover = Discovery.isDiscover(value.get().toString());
+
         String implName = buildImplName(interfaceEl);
-        return TypeSpec.classBuilder(implName)
+        TypeSpec.Builder builder = TypeSpec.classBuilder(implName)
             .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
             .addSuperinterface(TypeName.get(interfaceEl.asType()))
+            .addSuperinterface(TypeName.get(Generation.class))
             .addField(generateOkHttpClientField())
-            .addField(generateDiscoverField())
-            .addField(generateLoadBalancerField())
-            // 无参构建函数.
-            .addMethod(generatedConstructor(interfaceEl))
             .addMethods(methodSpecs)
-            .addJavadoc(buildClassJavaDoc())
-            .build();
+            .addJavadoc(buildClassJavaDoc());
+
+        // RestfulClient 注解的值必须会有值.
+        if (discover) {
+            builder
+                .addMethod(generatedConstructor(interfaceEl)) // 无参构建函数.
+                .addField(generateDiscoverField())
+                .addField(generateLoadBalancerField());
+        }
+
+        return builder.build();
     }
 
     private CodeBlock buildClassJavaDoc() {

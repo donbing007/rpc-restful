@@ -14,6 +14,7 @@ import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeMirror;
+import javax.lang.model.util.Elements;
 import javax.lang.model.util.SimpleAnnotationValueVisitor8;
 import javax.lang.model.util.SimpleTypeVisitor8;
 import javax.lang.model.util.TypeKindVisitor8;
@@ -26,6 +27,11 @@ import javax.lang.model.util.TypeKindVisitor8;
  * @since 1.8
  */
 public class AnnotationHelper {
+
+    /**
+     * 注解默认值的属性名称.
+     */
+    public static final String ANNOTATION_DEFAULT_FIELD_NAME = "value";
 
     /**
      * 获取指定元素上的注解信息.

@@ -60,10 +60,12 @@ public class RpcClientProcessorTest {
     private InMemoryClassLoader classLoader;
     private Compiler compiler;
 
+    private int serverPort = 8020;
+
     @BeforeEach
     void setUp() throws IOException {
         mockWebServer = new MockWebServer();
-        mockWebServer.start();
+        mockWebServer.start(serverPort);
 
         discovery = InMemoryDiscover.getInstance();
         discovery.register("test", new Endpoint(mockWebServer.getHostName(), mockWebServer.getPort()));
@@ -228,11 +230,43 @@ public class RpcClientProcessorTest {
         assertEquals(data, subscriber.getStringValue());
     }
 
+    @Test
+    public void testNoDiscover() throws Exception {
+        URL url = RpcClientProcessorTest.class.getResource("/mock/NoDiscoverGetAnnotationInterface.java");
+        assertNotNull(url);
+        JavaFileObject mockInterface = JavaFileObjects.forResource(url);
+
+        Compilation compilation = compiler.compile(mockInterface);
+        assertEquals(Compilation.Status.SUCCESS, compilation.status(), () -> buildError(compilation.errors()));
+        initMemoryClassLoader(compilation);
+
+        Data expectedData = new Data("test", 1);
+        mockWebServer.enqueue(new MockResponse()
+            .setBody(Json.serialize(expectedData))
+            .addHeader("Content-Type", "text/plain; charset=utf8"));
+        Class<?> implClass =
+            classLoader.loadClass(RpcClientProcessor.GENERATION_PACKAGE + ".NoDiscoverGetAnnotationInterfaceImpl");
+        Object instance = getInstance(implClass);
+        Method callMethod = implClass.getMethod("call", String.class, String.class, String.class);
+        String result = (String) callMethod.invoke(instance, "test", "100", "read");
+
+        assertEquals(Json.serialize(expectedData), result);
+
+        RecordedRequest recordedRequest = mockWebServer.takeRequest();
+        assertEquals("GET", recordedRequest.getMethod());
+        assertEquals("/test/get/100?type=read", recordedRequest.getPath());
+
+    }
+
     private void injectDiscover(Object instance) throws Exception {
         Class<?> clazz = instance.getClass();
-        Field discoverField = clazz.getDeclaredField(RpcClientProcessor.DISCOVER_MEMBER_VARIABLE_NAME);
-        discoverField.setAccessible(true);
-        discoverField.set(instance, this.discovery);
+        try {
+            Field discoverField = clazz.getDeclaredField(RpcClientProcessor.DISCOVER_MEMBER_VARIABLE_NAME);
+            discoverField.setAccessible(true);
+            discoverField.set(instance, this.discovery);
+        } catch (NoSuchFieldException ex) {
+            // do nothing.
+        }
     }
 
     private void injectOkHttpClient(Object instance) throws Exception {

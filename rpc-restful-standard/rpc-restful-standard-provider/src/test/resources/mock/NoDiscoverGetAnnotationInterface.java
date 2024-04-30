@@ -8,8 +8,8 @@ import com.vmsmia.framework.component.rpc.restful.annotation.method.Get;
 import com.vmsmia.framework.component.rpc.restful.annotation.parameter.PathVariable;
 import com.vmsmia.framework.component.rpc.restful.annotation.parameter.QueryParam;
 
-@RestfulClient("discover://test")
-public interface GetAnnotationInterface {
+@RestfulClient("http://localhost:8020")
+public interface NoDiscoverGetAnnotationInterface {
 
     @Get
     @Path("/{name}/get/{id}")
